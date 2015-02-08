@@ -1,0 +1,11 @@
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+
+network={
+	ssid="WiiU9ce63517d86e"
+	psk=475365645ae2c8b24f17a0789073602472b9caa649e10ca8e9bdb7bed926a1f8
+	proto=RSN
+	key_mgmt=WPA-PSK
+	pairwise=CCMP
+	auth_alg=OPEN
+}
