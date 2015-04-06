@@ -1,5 +1,4 @@
 import construct
-import pyaudio
 import select
 import socket
 import array
@@ -33,7 +32,7 @@ PORT_HID = 50022
 PORT_CMD = 50023
 
 # hack for now, replace with dhcp result
-LOCAL_IP = '192.168.1.11'
+LOCAL_IP = '172.21.61.99'
 
 HID_S = udp_service(LOCAL_IP, PORT_HID)
 
@@ -52,101 +51,6 @@ class ServiceBase(object):
     def close(s):
         pass
 
-class ServiceASTRM(ServiceBase):
-    def __init__(s):
-        super(ServiceASTRM, s).__init__()
-        s.header_base = construct.BitStruct('ASTRMBaseHeader',
-            construct.BitField('fmt', 3),
-            construct.Bit('channel'),
-            construct.Flag('vibrate'),
-            construct.Bit('packet_type'),
-            construct.BitField('seq_id', 10),
-            construct.BitField('payload_size', 16)
-        )
-        s.header_aud = construct.Struct('ASTRMAudioHeader',
-            construct.ULInt32('timestamp'),
-        #    construct.Array(lambda ctx: ctx.payload_size, construct.UBInt8("data"))
-        )
-        s.header_msg = construct.Struct('ASTRMMsgHeader',
-            # This is kind of a hack, (there are two timestamp fields, which one is used depends on packet_type
-            construct.ULInt32('timestamp_audio'),
-            construct.ULInt32('timestamp'),
-            construct.Array(2, construct.ULInt32('freq_0')), # -> mc_video
-            construct.Array(2, construct.ULInt32('freq_1')), # -> mc_sync
-            construct.ULInt8('vid_format'),
-            construct.Padding(3)
-        )
-        s.header = construct.Struct('ASTRMHeader',
-            construct.Embed(s.header_base),
-            construct.Switch('format_hdr', lambda ctx: ctx.packet_type,
-                {
-                    0 : construct.Embed(s.header_aud),
-                    1 : construct.Embed(s.header_msg),
-                },
-                default = construct.Pass
-            )
-        )
-        s.is_streaming = False
-        s.p = pyaudio.PyAudio()
-        s.stream = None
-
-        s.pa_num_bufs = 15
-        s.pa_ring = [array.array('H', '\0' * 416 * 2)] * s.pa_num_bufs
-        s.pa_wpos = s.pa_rpos = 0
-
-    def close(s):
-        if s.stream != None:
-            # hangs the process, dunno why
-            #s.stream.stop_stream()
-            s.stream.close()
-            s.stream = None
-        if s.p != None:
-            s.p.terminate()
-            s.p = None
-        s.is_streaming = False
-
-    def __pa_callback(s, in_data, frame_count, time_info, status):
-        samples = s.pa_ring[s.pa_wpos]
-        s.pa_wpos += 1
-        s.pa_wpos %= s.pa_num_bufs
-        samples.extend(s.pa_ring[s.pa_wpos])
-        s.pa_wpos += 1
-        s.pa_wpos %= s.pa_num_bufs
-        return (samples, pyaudio.paContinue)
-
-    def update(s, packet):
-        h = s.header.parse(packet)
-
-        # ignore vid_format packets for now
-        if h.packet_type == 0:
-            seq_ok = s.update_seq_id(h.seq_id)
-            if not seq_ok:
-                print 'astrm bad seq_id'
-            if h.fmt != 1 or h.channel != 0:
-                raise Exception('astrm currently only handles 48kHz PCM stereo')
-            if len(packet) != 8 + h.payload_size:
-                raise Exception('astrm bad payload_size')
-
-            if h.vibrate:
-                print '*vibrate*'
-
-            s.pa_ring[s.pa_rpos] = array.array('H', packet[8:])
-            s.pa_rpos += 1
-            s.pa_rpos %= s.pa_num_bufs
-
-            if s.is_streaming and not s.stream.is_active():
-                s.stream.close()
-                s.is_streaming = False
-
-            if s.is_streaming == False:
-                s.stream = s.p.open(format = pyaudio.paInt16,
-                    channels = 2,
-                    rate = 48000,
-                    output = True,
-                    frames_per_buffer = 416 * 2,
-                    stream_callback = s.__pa_callback)
-                s.stream.start_stream()
-                s.is_streaming = True
 
 class ServiceVSTRM(ServiceBase):
     dimensions = {
@@ -372,20 +276,19 @@ def hid_snd():
     global joystick, hid_seq_id
 
     report = array.array('H', '\0\0' * 0x40)
-
     button_mapping = {
-        0 : 0x8000, # a
-        1 : 0x4000, # b
-        2 : 0x2000, # x
-        3 : 0x1000, # y
-        4 : 0x0020, # l
-        5 : 0x0010, # r
-        6 : 0x0004, # back (minus)
-        7 : 0x0008, # start (plus)
-        8 : 0x0002, # xbox (home)
+        14 : 0x8000, # a
+        13 : 0x4000, # b
+        15 : 0x2000, # x
+        12 : 0x1000, # y
+        10 : 0x0020, # l
+        11 : 0x0010, # r
+        0 : 0x0004, # back (minus)
+        3 : 0x0008, # start (plus)
+        16 : 0x0002, # xbox (home)
         # extra buttons
-        9 : 0x08, # l3
-       10 : 0x04  # r3
+        1 : 0x08, # l3
+        2 : 0x04  # r3
     }
     hat_mapping_x = {
         0 : 0x000,
@@ -407,9 +310,11 @@ def hid_snd():
     report[0] = hid_seq_id
     # 16bit @ 2
     button_bits = 0
-    for i in xrange(9):
-        if joystick.get_button(i):
-            button_bits |= button_mapping[i]
+    #for i in xrange(9):
+    for key,value in button_mapping.iteritems():
+        if joystick.get_button(key):
+            print("got button, " + str(key) + " value is " + str(button_mapping[key]))
+            button_bits |= button_mapping[key]
     # hat: (<l/r>, <u/d>) [-1,1]
     #hat = joystick.get_hat(1)
     #button_bits |= hat_mapping_x[hat[0]]
@@ -424,20 +329,20 @@ def hid_snd():
     # 5: r trigger
     def scale_stick(OldValue, OldMin, OldMax, NewMin, NewMax):
         return int((((OldValue - OldMin) * (NewMax - NewMin)) / (OldMax - OldMin)) + NewMin)
-    for i in xrange(6):
-        if i in (2, 5):
+    for i in xrange(4):
+        if i in (5, 6):
             if joystick.get_axis(i) > 0:
                 button_bits |= trigger_mapping[i]
         else:
             orig = joystick.get_axis(i)
             scaled = 0x800
             if abs(orig) > 0.2:
-                if i in (0, 3):
+                if i in (0, 2):
                     scaled = scale_stick(orig, -1, 1, 900, 3200)
-                elif i in (1, 4):
+                elif i in (1, 3):
                     scaled = scale_stick(orig, 1, -1, 900, 3200)
             #print '%04i %04i %f' % (i, scaled, orig)
-            stick_mapping = { 0 : 0, 1 : 1, 3 : 2, 4 : 3 }
+            stick_mapping = { 0 : 0, 1 : 1, 2 : 2, 3 : 3 }
             report[3 + stick_mapping[i]] = scaled
     report[1] = (button_bits >> 8) | ((button_bits & 0xff) << 8)
 
@@ -479,14 +384,14 @@ def hid_snd():
     report[18 + 9 * 2 + 1] |= ((byte_19 & 2) | 4) << 12
 
     # 8bit @ 80
-    for i in xrange(9,11):
+    for i in xrange(1,3):
         if joystick.get_button(i):
             report[40] |= button_mapping[i]
 
     report[0x3f] = 0xe000
     #print report.tostring().encode('hex')
-    HID_S.sendto(report, ('192.168.1.10', PORT_HID))
-    hid_seq_id += 1
+    HID_S.sendto(report, ('129.21.50.9', PORT_HID))
+    #hid_seq_id += 1
 
 EVT_SEND_HID = pygame.USEREVENT
 pygame.time.set_timer(EVT_SEND_HID, int((1. / 180.) * 1000.))
