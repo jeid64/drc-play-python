@@ -486,7 +486,7 @@ def hid_snd():
     report[0x3f] = 0xe000
     #print report.tostring().encode('hex')
     HID_S.sendto(report, ('192.168.1.10', PORT_HID))
-    hid_seq_id += 1
+    #hid_seq_id += 1
 
 EVT_SEND_HID = pygame.USEREVENT
 pygame.time.set_timer(EVT_SEND_HID, int((1. / 180.) * 1000.))
